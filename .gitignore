@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# Built by python src/data.py
+*.duckdb
+
+# 674 MB of raw JODI; re-fetch with python src/download.py jodi
+data/jodi/
