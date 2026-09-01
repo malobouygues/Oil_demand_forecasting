@@ -24,5 +24,5 @@ CREATE TABLE predictors (
 
 -- The modelling table, panel, is not declared here. It is demand joined to whatever had
 -- been published by each month end, one column per predictor, so its columns follow
--- prepare.predictors() rather than a fixed contract; data.py creates it from the frame.
+-- timeseries.predictors() rather than a fixed contract; data.py creates it from the frame.
 -- The two tables above are the contract, and both are typed and keyed.

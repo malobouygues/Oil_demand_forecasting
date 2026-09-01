@@ -30,7 +30,7 @@ almost nothing; where the level is moving, as in China, it adds a third.
 JODI, FRED, OECD, World Bank, CPB        download.py  ->  data/<source>/*.csv
         |
         |  sql/demand.sql   filter, join to regions, aggregate, in place
-        |  prepare.py       stamp each observation with its publication date,
+        |  timeseries.py    stamp each observation with its publication date,
         |                   merge_asof(direction="backward") onto each month end
         v
    demand, predictors, panel              data.py      ->  data/oil.duckdb
@@ -69,7 +69,7 @@ carries two dates — the end of the period it describes, and the day it was pub
 A national account for 2019-Q1 describes January to March but does not exist until late
 April, so it must not appear in a February row.
 
-`prepare.py` stamps each observation with `available_at` and joins the drivers onto each
+`timeseries.py` stamps each observation with `available_at` and joins the drivers onto each
 month end with `merge_asof(direction="backward")`: as of the end of month *t*, take the
 most recent value already released. A two-year `tolerance` goes with it, so a series that
 has stopped publishing goes missing rather than being carried forward forever.
@@ -135,7 +135,7 @@ sql/schema.sql    typed, keyed declarations of demand and predictors
 sql/views.sql     coverage, product mix and publication lag, for the notebooks
 src/config.py     paths, the paper's geography and products, every timing assumption
 src/download.py   fetch the raw inputs
-src/prepare.py    publication dates, regional aggregation, the as-of join
+src/timeseries.py publication dates, regional aggregation, the as-of join
 src/data.py       build the store and read it back
 src/model.py      features, expanding-window CV, XGBoost, metrics, post-processing
 notebooks/01_data.ipynb    the data story and its controls
@@ -147,8 +147,8 @@ Run it:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python src/download.py
-python src/data.py
+python -m src.download
+python -m src.data
 jupyter lab notebooks/
 ```
 
@@ -200,7 +200,7 @@ And two in notebook 02:
 - **Sample size.** 216 monthly origins in the training window, and the twelve-month target
   means overlapping windows, so the effective independent sample is far smaller than the
   row count. This is why the hyperparameter grid is eight points and not eight hundred.
-- **Publication timing is modelled, not observed.** The lags in `prepare.LAG` are the
+- **Publication timing is modelled, not observed.** The lags in `config.LAG` are the
   publication conventions of each source, applied uniformly. Real release calendars vary.
 - **No vintages.** FRED and the OECD serve the *current* estimate of a past quarter, not
   what was first printed. GDP is revised for years afterwards, so a 2012 row carries a

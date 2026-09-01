@@ -1,17 +1,14 @@
-"""Download the raw inputs of the study into data/, one folder per source.
+"""Download the raw inputs into data/, one folder per source.
 
-    python src/download.py            # everything
-    python src/download.py oecd fred  # only the sources whose name matches
+    python -m src.download            # everything
+    python -m src.download oecd fred  # only the sources whose name matches
 
-The OIES paper runs on IEA MODS for demand and Oxford Economics for the predictors, both
-paid. Every source below is the closest free public substitute and the comment says which
-paper variable it stands in for. Nothing here needs an API key.
+The paper runs on IEA MODS for demand and Oxford Economics for the predictors, both paid.
+Every source below is the closest free public substitute, and none needs a key.
 
 Requests go through curl rather than urllib: FRED sits behind a CDN that hangs up on
 Python's TLS handshake, reproducibly, while curl on the same URL answers in half a second.
 """
-
-from __future__ import annotations
 
 import io
 import json
@@ -19,14 +16,15 @@ import re
 import subprocess
 import sys
 import zipfile
+
 import pandas as pd
 
-import config as c
+from src import config as c
 
 CURL = ["curl", "-sS", "-L", "--retry", "3", "--max-time", "900"]
 
-# FRED series -> the paper's Table 2 name. Monthly and quarterly are fetched separately:
-# a mixed-frequency request comes back as a zip of one file per series instead of a table.
+# FRED series -> the paper's Table 2 name. Monthly and quarterly are fetched separately: a
+# mixed-frequency request comes back as a zip of one file per series instead of a table.
 FRED = {
     "prices": {"POILBREUSDM": "rpo", "PNFUELINDEXM": "wci"},
     "macro_monthly": {"INDPRO": "ind_us", "IPG325S": "chem_us", "PPIACO": "ppi_us",
@@ -46,22 +44,22 @@ WORLDBANK = {"SP.POP.TOTL": "pop", "NY.GDP.MKTP.CD": "gdp", "NE.GDI.TOTL.CD": "i
 OECD = "https://sdmx.oecd.org/public/rest/data/{}/{}?startPeriod={}&format=csvfile"
 
 
-def get(url: str) -> bytes:
+def get(url):
     return subprocess.run(CURL + [url], capture_output=True, check=True).stdout
 
 
-def save(data: bytes | pd.DataFrame, folder, name: str) -> None:
+def save(payload, folder, name):
     path = folder / name
-    if isinstance(data, pd.DataFrame):
-        data.to_csv(path, index=False)
-    elif data:  # jodi writes itself, straight out of the zip
-        path.write_bytes(data)
+    if isinstance(payload, pd.DataFrame):
+        payload.to_csv(path, index=False)
+    elif payload:  # jodi writes itself, straight out of the zip
+        path.write_bytes(payload)
     print(f"  {name:32} {path.stat().st_size / 1e6:8.1f} MB")
 
 
-def jodi() -> None:
-    """JODI-Oil monthly demand by product and country, the stand-in for IEA MODS.
-    Kept as the raw 650 MB csv: sql/demand.sql queries it in place rather than loading it."""
+def jodi():
+    """Monthly demand by product and country, the stand-in for IEA MODS. Kept as the raw
+    650 MB csv: sql/demand.sql queries it in place rather than loading it."""
     archive = c.JODI_DIR / "jodi_secondary.zip"
     if not archive.exists():
         subprocess.run(CURL + ["-o", str(archive), "https://www.jodidata.org/_resources/"
@@ -71,8 +69,7 @@ def jodi() -> None:
     save(b"", c.JODI_DIR, "jodi_secondary.csv")
 
 
-def fred(group: str) -> None:
-    """rpo, wci and the US monthly block. One request per group, one frequency per group."""
+def fred(group):
     series = FRED[group]
     df = pd.read_csv(io.BytesIO(get("https://fred.stlouisfed.org/graph/fredgraph.csv?id="
                                     + ",".join(series))), na_values=".")
@@ -80,14 +77,15 @@ def fred(group: str) -> None:
          c.FRED_DIR, f"fred_{group}.csv")
 
 
-def oecd_kei() -> None:
-    """Key short-term indicators: production volume (ind, cbui), consumer prices (cpi) and
-    car registrations (pcars), monthly, as indices. Key is REF_AREA.FREQ.MEASURE.UNIT..."""
+def oecd_kei():
+    """Monthly indices: production volume (ind, cbui), consumer prices (cpi), car
+    registrations (pcars). Key is REF_AREA.FREQ.MEASURE.UNIT..."""
     key = ".".join(["+".join(sorted(c.ISO3)), "M", "PRVM+CP+TOCAPA", "IX", "", "", ""])
-    save(get(OECD.format("OECD.SDD.STES,DSD_KEI@DF_KEI", key, "2000-01")), c.OECD_DIR, "oecd_kei.csv")
+    save(get(OECD.format("OECD.SDD.STES,DSD_KEI@DF_KEI", key, "2000-01")),
+         c.OECD_DIR, "oecd_kei.csv")
 
 
-def oecd_qna() -> None:
+def oecd_qna():
     """Quarterly national accounts: gdp, inv and cons in USD PPP, value added (out) and
     disposable income (inc) in national currency."""
     areas = "+".join(sorted(c.ISO3))
@@ -107,8 +105,7 @@ def oecd_qna() -> None:
              c.OECD_DIR, f"oecd_qna_{name}.csv")
 
 
-def worldbank() -> None:
-    """pop, gdp, inv, airp and egen for every country plus the world aggregate."""
+def worldbank():
     frames = []
     for code, name in WORLDBANK.items():
         page = json.loads(get(f"https://api.worldbank.org/v2/country/all/indicator/{code}"
@@ -120,10 +117,9 @@ def worldbank() -> None:
     save(pd.concat(frames).dropna(subset=["value"]), c.WORLDBANK_DIR, "worldbank_annual.csv")
 
 
-def cpb() -> None:
-    """CPB's world trade volume index, standing in for Oxford Economics' wtr. The workbook
-    name carries its vintage, so read the link off the page; converted to csv on the way in
-    so nothing downstream needs an Excel reader."""
+def cpb():
+    """World trade volume index, standing in for Oxford Economics' wtr. The workbook name
+    carries its vintage, so read the link off the page; converted to csv on the way in."""
     page = get("https://www.cpb.nl/en/worldtrademonitor/latest").decode("utf-8", "ignore")
     href = re.search(r'href="([^"]*World-trade-monitor[^"]*\.xlsx)"', page, re.I).group(1)
     book = pd.read_excel(io.BytesIO(get("https://www.cpb.nl" + href)),
@@ -141,7 +137,7 @@ SOURCES = [("jodi", jodi), ("fred prices", lambda: fred("prices")),
            ("oecd qna", oecd_qna), ("world bank", worldbank), ("cpb world trade", cpb)]
 
 
-def main(only: list[str]) -> None:
+def main(only):
     for folder in (c.JODI_DIR, c.FRED_DIR, c.OECD_DIR, c.WORLDBANK_DIR, c.CPB_DIR):
         folder.mkdir(parents=True, exist_ok=True)
     for name, source in SOURCES:
