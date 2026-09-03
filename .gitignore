@@ -10,9 +10,6 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 
-# Built by python -m src.sql
-*.duckdb
-
 # 650 MB of JODI and 50 MB of Ember; re-fetch with python -m src.download jodi ember
 data/jodi_secondary.*
 data/ember_yearly.csv
