@@ -2,7 +2,7 @@
 
 Direct multi-horizon forecasting, one model per step, as in the paper:
 
-    model_1 -> demand(t+1)    model_2 -> demand(t+2)   ...   model_24 -> demand(t+24)
+    model_1 -> demand(t+1)    model_2 -> demand(t+2)   ...   model_12 -> demand(t+12)
 
 Recursive forecasting would feed each prediction back in as an input and compound its own
 error across the horizon.
@@ -10,7 +10,7 @@ error across the horizon.
 Features at origin t are the twelve most recent published demand readings plus the panel's
 drivers as of t. JODI publishes a month about two months after it closes, so the newest
 demand a forecaster holds at t is d(t-2), not d(t); the drivers were aligned point-in-time
-in timeseries.py. Nothing is scaled: a tree splits on thresholds, so a monotone rescaling
+in data.py. Nothing is scaled: a tree splits on thresholds, so a monotone rescaling
 leaves the split structure untouched.
 """
 
@@ -18,10 +18,10 @@ import numpy as np
 import pandas as pd
 from xgboost import XGBRegressor
 
-from src import config as c
+from src import config as c, data
 
 LAGS = 12       # d(t-2) back to d(t-13), the paper's twelve target lags
-HORIZON = 24    # the 2022-23 test window is twenty-four months
+HORIZON = 12    # the 2024 test window is twelve months
 
 PARAMS = dict(objective="reg:squarederror", subsample=0.8, colsample_bytree=0.8,
               random_state=42, n_jobs=4, verbosity=0)
@@ -42,11 +42,12 @@ def features(df, product, step):
 
 
 def trainable(X, y, step, origin):
-    """Rows whose target month has already happened by the origin, and is observed. Capped
-    at TRAIN_END as well: the origin sits two years past the training window and everything
-    between them is COVID, which stays out of the fit."""
+    """Rows whose target month has already happened by the origin, and is observed. Rows
+    touching an excluded year at either end are dropped; their feature lags can still reach
+    into it, which is the price of not throwing away the neighbouring years too."""
     target = X.index + pd.DateOffset(months=step)
-    return (target <= min(pd.Timestamp(origin), pd.Timestamp(c.TRAIN_END))) & y.notna()
+    covid = X.index.year.isin(c.EXCLUDE_YEARS) | target.year.isin(c.EXCLUDE_YEARS)
+    return (target <= min(pd.Timestamp(origin), pd.Timestamp(c.TRAIN_END))) & y.notna() & ~covid
 
 
 def cv_score(X, y, step, params, folds=3):
@@ -137,3 +138,55 @@ def score(df, path):
     weight = actual.mean()
     return pd.concat([by_product,
                       pd.Series({"weighted": (by_product * weight).sum() / weight.sum()})])
+
+
+def leave_one_out(df, origin=c.ORIGIN, horizon=HORIZON, seeds=(1, 2, 3, 4)):
+    """Drop one driver at a time, refit, and score against the full model.
+
+    Hyperparameters are tuned once on the full set and reused for every run, so what moves
+    is the feature and not a different search. A driver whose removal lowers the weighted
+    MAPE is counterproductive by the plain criterion.
+
+    `beyond_noise` is the check that criterion needs. subsample and colsample_bytree are
+    below 1, so dropping a column also perturbs the random draws; refitting the *same*
+    features under a few different seeds measures how much the score moves for no reason at
+    all. An effect inside that band says nothing about the feature.
+    """
+    full, chosen = forecast(df, origin, horizon)
+    base = score(df, full)["weighted"]
+
+    resampled = []
+    for seed in seeds:
+        PARAMS["random_state"] = seed
+        resampled.append(score(df, forecast(df, origin, horizon, chosen=chosen)[0])["weighted"])
+    PARAMS["random_state"] = 42
+    noise = max(abs(r - base) for r in resampled)
+
+    without = {driver: score(df, forecast(df.drop(columns=driver), origin, horizon,
+                                          chosen=chosen)[0])["weighted"]
+               for driver in df.columns.drop(c.PRODUCTS)}
+
+    out = pd.DataFrame({"mape_with_all": base, "mape_without": pd.Series(without)})
+    out["change_pct"] = (out["mape_without"] / base - 1) * 100
+    out["counterproductive"] = out["mape_without"] < base
+    out["beyond_noise"] = (out["mape_without"] - base).abs() > noise
+    return out.sort_values("change_pct"), noise
+
+
+if __name__ == "__main__":
+    report = []
+    for region in c.REGIONS:
+        df = data.dataset(region)
+        table, noise = leave_one_out(df)
+        base = table["mape_with_all"].iloc[0]
+        naive = score(df, seasonal_naive(df))["weighted"]
+        report += [
+            f"{region.upper()}  --  weighted MAPE on {c.TEST[0][:4]}, one driver dropped per row",
+            f"  all drivers      {base:5.2f}%",
+            f"  seasonal naive   {naive:5.2f}%",
+            f"  seed noise       +/-{noise:.2f}pp on the same features, so any |change| below "
+            f"{100 * noise / base:.1f}% is not a result",
+            "", table.round(2).to_string(), ""]
+    path = c.ROOT / "ablation_2024.txt"
+    path.write_text("\n".join(report))
+    print("\n".join(report))

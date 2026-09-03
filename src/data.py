@@ -1,54 +1,50 @@
-"""Build data/oil.duckdb from the raw files, and read it back.
+"""From the two DuckDB tables to one modelling frame per region.
 
-    python -m src.data
+    dataset("us")  ->  one row per month: the seven products, then every driver as it was
+                       readable at that month end
 
-`demand` and `predictors` are declared in sql/schema.sql because they are the contract
-everything rests on; `panel` is created from the frame, since its columns follow whatever
-predictors exist. The notebooks read through here rather than touching a raw file.
+Every driver observation carries two dates. period_end is the last day of the period the number
+describes; available_at is the day it was published, period_end plus the source's lag. A quarter
+of credit describing January to March does not exist until June and must not appear in an April
+row, so the join is merge_asof backward on available_at: as of each month end, the most recent
+value already published. Drivers become step functions rather than smooth lines, which costs a
+tree nothing.
 """
 
-import duckdb
 import pandas as pd
 
-from src import config as c, timeseries
+from src import config as c, sql
 
 
-def build():
-    c.DB_PATH.unlink(missing_ok=True)
-    with duckdb.connect(c.DB_PATH) as con:
-        demand = timeseries.demand(con)
-        drivers = timeseries.predictors()
-        table = timeseries.panel(demand, drivers)
-
-        con.execute((c.SQL_DIR / "schema.sql").read_text())
-        for name, frame in [("demand", demand), ("predictors", drivers)]:
-            con.register("frame", frame)
-            con.execute(f"INSERT INTO {name} SELECT * FROM frame")
-        con.register("frame", table)
-        con.execute("CREATE TABLE panel AS SELECT * FROM frame")
-        con.execute((c.SQL_DIR / "views.sql").read_text())
-
-        for name in ["demand", "predictors", "panel"]:
-            rows = con.sql(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-            print(f"  {name:12} {rows:>7,} rows  {len(con.table(name).columns):>2} columns")
+def demand(region):
+    """Seven products as columns, one row per month."""
+    df = sql.query(f"SELECT product, month, kbd FROM demand WHERE region = '{region}'")
+    df["month"] = pd.to_datetime(df["month"])
+    return df.pivot(index="month", columns="product", values="kbd")
 
 
-def query(sql):
-    with duckdb.connect(c.DB_PATH, read_only=True) as con:
-        return con.sql(sql).df()
+def predictors(region):
+    """Each driver as a series at its own frequency, indexed by period_end."""
+    df = sql.query(f"SELECT variable, period_end, value FROM predictors WHERE region = '{region}'")
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    series = {name: s.set_index("period_end")["value"] for name, s in df.groupby("variable")}
+    if region == "us":
+        series["rpo_real"] = series.pop("brent") / series.pop("cpi")  # Brent in constant dollars
+    return series
 
 
-def load_panel():
-    return query("SELECT * FROM panel ORDER BY region, month").astype({"month": "datetime64[ns]"})
-
-
-def region_frame(region):
-    """One region as a monthly frame, reindexed on a complete monthly range so a gap in the
-    source shows up as a gap rather than as a missing row."""
-    df = load_panel()
-    df = df[df["region"] == region].drop(columns="region").set_index("month")
-    return df.reindex(pd.date_range(df.index.min(), df.index.max(), freq="MS"))
-
-
-if __name__ == "__main__":
-    build()
+def dataset(region):
+    """Demand joined to every driver published by each month end, on a complete monthly index so
+    a gap in a source shows as a gap and not as a missing row."""
+    df = demand(region)
+    df = df.reindex(pd.date_range(df.index.min(), df.index.max(), freq="MS", name="month"))
+    df = df.loc[c.SAMPLE[0]:c.SAMPLE[1]].reset_index()
+    # the forecast origin: whatever was published by the last day of the month
+    df["month_end"] = df["month"] + pd.offsets.MonthEnd(0)
+    for name, s in predictors(region).items():
+        s = s.dropna().rename(name).reset_index()
+        s["available_at"] = s["period_end"] + pd.offsets.MonthEnd(c.LAG[name])
+        df = pd.merge_asof(df, s[["available_at", name]].sort_values("available_at"),
+                           left_on="month_end", right_on="available_at", direction="backward",
+                           tolerance=pd.Timedelta(days=c.STALE_DAYS)).drop(columns="available_at")
+    return df.drop(columns="month_end").set_index("month")
