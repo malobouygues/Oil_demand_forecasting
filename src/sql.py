@@ -56,7 +56,7 @@ def build():
             WHERE Area = 'China' AND Category = 'Electricity demand' AND Unit = 'TWh'""")
         con.execute(f"""
             INSERT INTO predictors
-            SELECT 'china', 'inv', make_date(year, 12, 31), inv
+            SELECT 'china', 'inv', make_date(year, 12, 31), inv / 1e9   -- bn USD
             FROM read_csv('{c.DATA}/worldbank_china.csv')""")
         con.execute(f"""
             INSERT INTO predictors

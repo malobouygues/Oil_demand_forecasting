@@ -1,6 +1,3 @@
-# Local draft, not the public README
-README copy.md
-
 # macOS
 .DS_Store
 
@@ -10,6 +7,9 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 
-# 650 MB of JODI and 50 MB of Ember; re-fetch with python -m src.download jodi ember
+# JODI and Ember (too large to commit)
 data/jodi_secondary.*
 data/ember_yearly.csv
+
+# en attendant
+README copy.md

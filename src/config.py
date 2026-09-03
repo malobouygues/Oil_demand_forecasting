@@ -40,9 +40,7 @@ STALE_DAYS = 730
 
 # --- the sample and the experiment ---------------------------------------------
 SAMPLE = ("2000-01-01", "2025-12-31")
-# Train and select through 2023, forecast 2024. 2020 is dropped from the training sample: the
-# demand collapse and its rebound are a shock the model should not learn as a pattern.
-TRAIN_END = "2023-12-31"
-TEST = ("2024-01-01", "2024-12-31")
-ORIGIN = "2023-12-01"  # the month the forecast is made from
+# Forecast 2024 from December 2023, with what was published by its last day. 2020 is dropped
+# from the training sample: the collapse and its rebound are a shock, not a pattern to learn.
+ORIGIN = "2023-12-01"
 EXCLUDE_YEARS = [2020]
