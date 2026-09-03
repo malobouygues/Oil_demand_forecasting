@@ -1,6 +1,6 @@
 -- Annual regional demand in mb/d next to the number of reporting countries. Reading the
--- two together is the coverage control: other non-OECD loses reporters through the sample,
--- so its demand falls for a reason that has nothing to do with oil.
+-- two together is the coverage control: a country that stops reporting to JODI looks
+-- exactly like a fall in demand.
 CREATE OR REPLACE VIEW v_regional_demand AS
 SELECT
     YEAR(month)                       AS year,
@@ -11,8 +11,8 @@ FROM demand
 GROUP BY 1, 2
 ORDER BY 1, 2;
 
--- Share of each region's barrels by product, five-year steps. Diesel-heavy Europe against
--- gasoline-heavy America shows up here, and so would a mapping error.
+-- Share of each region's barrels by product. Gasoline-heavy America against
+-- petrochemical-heavy China shows up here, and so would a mapping error.
 CREATE OR REPLACE VIEW v_product_mix AS
 SELECT
     YEAR(month) AS year,

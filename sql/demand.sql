@@ -8,7 +8,7 @@
 -- Reads three relations that data.py registers on the connection:
 --   jodi_raw   the csv, as text
 --   products   JODI product code -> d1..d7
---   countries  ISO-2 -> region, for the countries the paper names
+--   countries  ISO-2 -> region; the join is inner, so only these are kept
 --
 -- reporters comes back with the total on purpose. A regional figure is the sum of whoever
 -- reported that month, so a country leaving JODI looks exactly like a fall in demand.
@@ -23,14 +23,14 @@ WITH jodi AS (
       AND UNIT_MEASURE   = 'KBD'
 )
 SELECT
-    COALESCE(countries.region, 'other_non_oecd') AS region,   -- anything unnamed is the residual
+    countries.region,
     products.product,
     jodi.month,
     SUM(jodi.kbd)   AS kbd,
     COUNT(*)        AS reporters
 FROM jodi
 JOIN products  ON products.code     = jodi.code
-LEFT JOIN countries ON countries.country = jodi.country
+JOIN countries ON countries.country = jodi.country
 WHERE jodi.kbd IS NOT NULL
 GROUP BY 1, 2, 3
 ORDER BY 1, 2, 3;

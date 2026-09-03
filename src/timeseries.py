@@ -88,40 +88,28 @@ def read_oecd_kei():
 
 
 def read_oecd_qna():
-    """Quarterly accounts. gdp, inv and cons are USD PPP levels and add across countries;
-    value added and disposable income are national currency, so they count as indices."""
-    out = []
-    for name, keep, rename, how in [
-        ("expenditure", lambda d: d["PRICE_BASE"] == "LR",
-         {"B1GQ": "gdp", "P51G": "inv", "P3": "cons"}, "sum"),
-        ("value_added", lambda d: (d["ACTIVITY"] == "_T") & (d["PRICE_BASE"] == "L"),
-         {"B1G": "out"}, "mean"),
-        ("income", lambda d: d["TRANSACTION"] == "B6N", {"B6N": "inc"}, "mean"),
-    ]:
-        df = pd.read_csv(c.OECD_DIR / f"oecd_qna_{name}.csv", low_memory=False)
-        df = df[keep(df)].rename(columns={"REF_AREA": "iso3", "OBS_VALUE": "value"})
-        df["variable"] = df["TRANSACTION"].map(rename)
-        df["region"] = df["iso3"].map(c.ISO3)
-        df["period_end"] = pd.PeriodIndex(df["TIME_PERIOD"], freq="Q").end_time.normalize()
-        df = df.dropna(subset=["variable", "region", "value"])
-        df = df.groupby(["iso3", "region", "variable", "period_end"], as_index=False)["value"].mean()
-        out.append(by_region(df, how))
-    return stamp(pd.concat(out), "oecd", "oecd")
+    """Quarterly accounts, USD PPP chained volumes, so they add across countries. The
+    disposable-income dataflow is not requested: the OECD publishes B6N for neither the US
+    nor China, so inc comes from FRED alone."""
+    df = pd.read_csv(c.OECD_DIR / "oecd_qna_expenditure.csv", low_memory=False)
+    df = df[df["PRICE_BASE"] == "LR"].rename(columns={"REF_AREA": "iso3", "OBS_VALUE": "value"})
+    df["variable"] = df["TRANSACTION"].map({"B1GQ": "gdp", "P51G": "inv", "P3": "cons"})
+    df["region"] = df["iso3"].map(c.ISO3)
+    df["period_end"] = pd.PeriodIndex(df["TIME_PERIOD"], freq="Q").end_time.normalize()
+    df = df.dropna(subset=["variable", "region", "value"])
+    df = df.groupby(["iso3", "region", "variable", "period_end"], as_index=False)["value"].mean()
+    return stamp(by_region(df, "sum"), "oecd", "oecd")
 
 
 def read_worldbank():
-    """Annual, and the only source that reaches other non-OECD - taken as the world
-    aggregate minus the six named regions. It holds flat for a year and steps once."""
+    """Annual: pop, gdp, inv, airp as levels and egen as a share. Holds flat for a year
+    and steps once."""
     wb = pd.read_csv(c.WORLDBANK_DIR / "worldbank_annual.csv")
     wb["period_end"] = pd.to_datetime(wb["year"].astype(str) + "-12-31")
-    named = wb.assign(region=wb["iso3"].map(c.ISO3)).dropna(subset=["region"])
-    levels = by_region(named[named["variable"] != "egen"], "sum")
-    world = (wb[(wb["iso3"] == "WLD") & (wb["variable"] != "egen")]
-             .set_index(["period_end", "variable"])["value"])
-    rest = world - levels.set_index(["period_end", "variable"])["value"].groupby(level=[0, 1]).sum()
-    rest = rest.dropna().reset_index().assign(region=c.RESIDUAL)
-    shares = by_region(named[named["variable"] == "egen"], "mean")
-    return stamp(pd.concat([levels, rest, shares]), "worldbank", "worldbank")
+    wb = wb.assign(region=wb["iso3"].map(c.ISO3)).dropna(subset=["region"])
+    levels = by_region(wb[wb["variable"] != "egen"], "sum")
+    shares = by_region(wb[wb["variable"] == "egen"], "mean")
+    return stamp(pd.concat([levels, shares]), "worldbank", "worldbank")
 
 
 def read_cpb():
@@ -129,7 +117,7 @@ def read_cpb():
     df = pd.read_csv(c.CPB_DIR / "cpb_world_trade.csv")
     df["period_end"] = pd.PeriodIndex(df["month"], freq="M").end_time.normalize()
     df = df.melt(["period_end"], ["wtr"], var_name="variable", value_name="value").dropna()
-    return stamp(everywhere(df), "trade", "fred")
+    return stamp(everywhere(df), "trade", "cpb")
 
 
 def predictors():
@@ -162,4 +150,5 @@ def panel(target, drivers):
                              direction="backward",
                              tolerance=pd.Timedelta(days=c.STALE_AFTER_DAYS))
         grid = grid.drop(columns="available_at")
+    grid = grid[grid["month"].between(*pd.to_datetime(c.SAMPLE))]
     return grid.drop(columns="as_of").sort_values(["region", "month"]).reset_index(drop=True)

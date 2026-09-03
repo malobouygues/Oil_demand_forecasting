@@ -2,7 +2,7 @@
 
 Direct multi-horizon forecasting, one model per step, as in the paper:
 
-    model_1 -> demand(t+1)    model_2 -> demand(t+2)   ...   model_12 -> demand(t+12)
+    model_1 -> demand(t+1)    model_2 -> demand(t+2)   ...   model_24 -> demand(t+24)
 
 Recursive forecasting would feed each prediction back in as an input and compound its own
 error across the horizon.
@@ -21,7 +21,7 @@ from xgboost import XGBRegressor
 from src import config as c
 
 LAGS = 12       # d(t-2) back to d(t-13), the paper's twelve target lags
-HORIZON = 12    # section 4.1 forecasts twelve months out of sample
+HORIZON = 24    # the 2022-23 test window is twenty-four months
 
 PARAMS = dict(objective="reg:squarederror", subsample=0.8, colsample_bytree=0.8,
               random_state=42, n_jobs=4, verbosity=0)
@@ -42,8 +42,11 @@ def features(df, product, step):
 
 
 def trainable(X, y, step, origin):
-    """Rows whose target month has already happened by the origin, and is observed."""
-    return (X.index + pd.DateOffset(months=step) <= origin) & y.notna()
+    """Rows whose target month has already happened by the origin, and is observed. Capped
+    at TRAIN_END as well: the origin sits two years past the training window and everything
+    between them is COVID, which stays out of the fit."""
+    target = X.index + pd.DateOffset(months=step)
+    return (target <= min(pd.Timestamp(origin), pd.Timestamp(c.TRAIN_END))) & y.notna()
 
 
 def cv_score(X, y, step, params, folds=3):
@@ -90,9 +93,13 @@ def forecast(df, origin=c.ORIGIN, horizon=HORIZON, chosen=None):
 
 
 def seasonal_naive(df, origin=c.ORIGIN, horizon=HORIZON):
-    """Next year's month is this year's same month: free, and the number XGBoost has to beat."""
-    index = pd.date_range(pd.Timestamp(origin) + pd.DateOffset(months=1), periods=horizon, freq="MS")
-    return df.loc[index - pd.DateOffset(years=1), c.PRODUCTS].set_axis(index)
+    """Repeat the same calendar month of the origin's own year: free, and the number
+    XGBoost has to beat. Over a 24-month horizon both years repeat it, because the year in
+    between has not happened when the forecast is made."""
+    origin = pd.Timestamp(origin)
+    index = pd.date_range(origin + pd.DateOffset(months=1), periods=horizon, freq="MS")
+    reference = pd.to_datetime({"year": origin.year, "month": index.month, "day": 1})
+    return df.loc[reference, c.PRODUCTS].set_axis(index)
 
 
 # --- 3.3 post-processing ----------------------------------------------------------

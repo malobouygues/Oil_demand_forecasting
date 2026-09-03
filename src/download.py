@@ -79,30 +79,20 @@ def fred(group):
 
 def oecd_kei():
     """Monthly indices: production volume (ind, cbui), consumer prices (cpi), car
-    registrations (pcars). Key is REF_AREA.FREQ.MEASURE.UNIT..."""
+    Key is REF_AREA.FREQ.MEASURE.UNIT_MEASURE.ACTIVITY.ADJUSTMENT.TRANSFORMATION."""
     key = ".".join(["+".join(sorted(c.ISO3)), "M", "PRVM+CP+TOCAPA", "IX", "", "", ""])
     save(get(OECD.format("OECD.SDD.STES,DSD_KEI@DF_KEI", key, "2000-01")),
          c.OECD_DIR, "oecd_kei.csv")
 
 
 def oecd_qna():
-    """Quarterly national accounts: gdp, inv and cons in USD PPP, value added (out) and
-    disposable income (inc) in national currency."""
-    areas = "+".join(sorted(c.ISO3))
+    """Quarterly national accounts: gdp, inv and cons in USD PPP."""
     # DSD_NAMAIN1 has 13 dimensions: FREQ, ADJUSTMENT, REF_AREA, SECTOR, COUNTERPART_SECTOR,
     # TRANSACTION, INSTR_ASSET, ACTIVITY, EXPENDITURE, UNIT_MEASURE, PRICE_BASE,
-    # TRANSFORMATION, TABLE_IDENTIFIER. Filtering ACTIVITY in the request rather than after
-    # takes value added from 17 MB to 1.4 MB.
-    for name, flow, key in [
-        ("expenditure", "DSD_NAMAIN1@DF_QNA_EXPENDITURE_USD,1.1",
-         ["Q", "", areas, "", "", "B1GQ+P51G+P3"] + [""] * 7),
-        ("value_added", "DSD_NAMAIN1@DF_QNA_BY_ACTIVITY_OUTPUT,1.1",
-         ["Q", "", areas, "", "", "B1G", "", "_T"] + [""] * 5),
-        ("income", "DSD_NAMAIN1@DF_QNA_INC_SAV,1.1",
-         ["Q", "", areas, "", "", "B6N+B6G"] + [""] * 7),
-    ]:
-        save(get(OECD.format("OECD.SDD.NAD," + flow, ".".join(key), "2000-Q1")),
-             c.OECD_DIR, f"oecd_qna_{name}.csv")
+    # TRANSFORMATION, TABLE_IDENTIFIER.
+    key = ".".join(["Q", "", "+".join(sorted(c.ISO3)), "", "", "B1GQ+P51G+P3"] + [""] * 7)
+    save(get(OECD.format("OECD.SDD.NAD,DSD_NAMAIN1@DF_QNA_EXPENDITURE_USD,1.1", key, "2000-Q1")),
+         c.OECD_DIR, "oecd_qna_expenditure.csv")
 
 
 def worldbank():
